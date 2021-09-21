@@ -127,6 +127,35 @@ vec3 cookTorranceSpecular(float NdotH, float HdotL, float NdotV, float NdotL, fl
     return saturate(D * F * G);
 }
 
+//https://ubm-twvideo01.s3.amazonaws.com/o1/vault/gdc2017/Presentations/Hammon_Earl_PBR_Diffuse_Lighting.pdf
+vec3 hammonDiffuse(float NdotL, float NdotV, float NdotH, float VdotL, float roughness, vec3 diffuse_color)
+{
+    //Alpha
+    float alpha = roughness * roughness;
+
+    //Check if surface is facing view direction
+    float facing = 0.5 + 0.5 * VdotL;
+
+    //Can use spherical gaussian approximation
+    float fresnel_NL = 1.0 - exp2((-5.55473 * NdotL - 6.98316) * NdotL);
+    float fresnel_NV = 1.0 - exp2((-5.55473 * NdotV - 6.98316) * NdotV);
+ 
+    //Rough surface
+    float surf_rough = NdotH <= 0.0 ? 0.0 : facing * (0.9 - 0.4 * facing) * ((0.5 + NdotH) / NdotH);
+    
+    //Smooth surface
+    float surf_smooth = 1.05 * fresnel_NL * fresnel_NV;
+    
+    //Single scattering
+    float singlescatter = mix(surf_smooth, surf_rough, alpha) / PI;
+    
+    //Multiple scattering
+    float multiscatter = 0.1159 * alpha;
+    
+    //Output
+	return saturate(diffuse_color * (singlescatter + diffuse_color * multiscatter));
+}
+
 /*
     Thanks LVutner for the help!
     https://github.com/LVutner
@@ -153,19 +182,10 @@ vec3 cookTorrance(vec3 N, vec3 V, vec3 L, material data, vec3 lightmap, vec3 sha
 
     vec3 diffuse = vec3(0.0);
     if(!isMetal) {
-        // OREN-NAYAR MODEL - QUALITATIVE 
-        // http://www1.cs.columbia.edu/CAVE/publications/pdfs/Oren_CVPR93.pdf
-        
-        vec2 angles = acos(vec2(NdotL, NdotV));
-        if(angles.x < angles.y) angles = angles.yx;
-        float cosA = saturate(dot(normalize(V - NdotV * N), normalize(L - NdotL * N)));
-
-        vec3 A = data.albedo * (INV_PI - 0.09 * (alpha / (alpha + 0.4)));
-        vec3 B = data.albedo * (0.125 * (alpha /  (alpha + 0.18)));
-        diffuse = A + B * max(0.0, cosA) * sin(angles.x) * tan(angles.y);
+        diffuse = hammonDiffuse(NdotL, NdotV, NdotH, dot(V, L), data.roughness, data.albedo);
     }
 
-    vec3 Lighting = (diffuse + specular) * (NdotL * shadowmap) * getDayColor() * SUN_INTENSITY;
+    vec3 Lighting = (diffuse + specular) * NdotL * shadowmap * getDayColor() * SUN_INTENSITY;
     Lighting += data.emission * data.albedo;
 
     if(!isMetal) {

@@ -28,23 +28,37 @@ vec3 computePTGI(in vec3 screenPos, bool isMetal) {
         vec3 sampleDir = TBN * randomHemisphereDirection(noise);
         bool hit = raytrace(hitPos, sampleDir, GI_STEPS, uniformNoise(i).r, hitPos);
 
-        /* Calculating the BRDF & applying it */
+        //Sample new data
         vec3 F0 = vec3(texture2D(colortex2, hitPos.xy).g);
         float roughness = texture2D(colortex2, hitPos.xy).r;
-
-        vec3 microfacet = sampleGGXVNDF(-viewDir * TBN, noise.yx, roughness);
-        vec3 reflected = reflect(viewDir, TBN * microfacet);
-
-        vec3 H = normalize(viewDir + reflected);
-        float NdotL = saturate(dot(normal, reflected));
+		vec3 albedo = texture2D(colortex0, hitPos.xy).rgb;
+		
+		////////////////////////////////////////////////////////////
+		//Diffuse part
+        vec3 H = normalize(viewDir + sampleDir);
+        float NdotL = saturate(dot(normal, sampleDir));
         float NdotV = saturate(dot(normal, viewDir));
         float NdotH = saturate(dot(normal, H));
+		
+		float kappa = PI; //smol hack for brighter diffuse
+		
+		vec3 diffuse_brdf = isMetal ? vec3(0.0) : hammonDiffuse(NdotL, NdotV, NdotH, dot(viewDir, sampleDir), roughness, albedo) * NdotL * kappa;
+		
+		////////////////////////////////////////////////////////////
+		//Specular part
+        vec3 microfacet = sampleGGXVNDF(-viewDir * TBN, noise.xy, roughness);
+        vec3 reflected = reflect(viewDir, TBN * microfacet);
+
+        H = normalize(viewDir + reflected);
+        NdotL = saturate(dot(normal, reflected));
+        NdotV = saturate(dot(normal, viewDir));
+        NdotH = saturate(dot(normal, H));
         float HdotL = saturate(dot(H, reflected));
 
-        vec3 albedo = isMetal ? vec3(0.0) : texture2D(colortex0, hitPos.xy).rgb;
-        vec3 specular = cookTorranceSpecular(NdotH, HdotL, NdotV, NdotL, roughness, F0) * texture2D(colortex9, hitPos.xy).rgb;
+        vec3 specular_brdf = cookTorranceSpecular(NdotH, HdotL, NdotV, NdotL, roughness, F0) * texture2D(colortex9, hitPos.xy).rgb * NdotL;
 
-        weight *= albedo + specular;
+		//Accumulation
+        weight *= diffuse_brdf + specular_brdf;
         radiance += weight;
     }
     return radiance;
